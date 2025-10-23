@@ -1,8 +1,10 @@
 # pyids/core/sniffer.py
 from __future__ import annotations
 from datetime import datetime
-from typing import Optional, Callable
+from typing import Optional, Callable, Iterable
 import sys
+import time
+from pyids.detectors.base import Detector, Alert
 
 from scapy.all import sniff, conf, IFACES, Packet  # type: ignore
 
@@ -34,6 +36,31 @@ def _default_callback(pkt: Packet) -> None:
     except Exception:
         summary = "<unprintable packet>"
     print(f"[{ts}] {summary}")
+
+
+def make_detection_callback(detectors: Iterable[Detector], verbose_packets: bool = True):
+    """
+    Returns a Scapy 'prn' callback that feeds packets to detectors and prints alerts live.
+    """
+    def _cb(pkt):
+        now = time.time()
+        if verbose_packets:
+            try:
+                print(f"[pkt] {pkt.summary()}")
+            except Exception:
+                print("[pkt] <unprintable>")
+        for det in detectors:
+            try:
+                alerts = det.process(pkt, now)
+            except Exception as e:
+                print(f"[detector err] {det.__class__.__name__}: {e}")
+                continue
+            for a in alerts:
+                # compact single-line alert; later we’ll also log to SQLite/JSON
+                print(f"[ALERT] {a.kind.upper()} sev={a.severity} src={a.src} dst={a.dst} msg='{a.message}' meta={a.meta}")
+    return _cb
+
+
 
 def run_sniffer(
     iface: str,
